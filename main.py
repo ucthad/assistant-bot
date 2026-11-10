@@ -179,12 +179,13 @@ TOOL_DECLARATIONS = [
 
 # --- GEMINI AGENT REASONING ENGINE ---
 def call_gemini_agent(user_text: str, image_bytes: bytes = None) -> str:
+    from main_fallback import fallback_process
     if not GEMINI_API_KEY:
-        # Fallback to local rule engine if no API key is supplied yet
-        from main_fallback import fallback_process
         return fallback_process(user_text)
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    # Use latest high-speed Gemini Flash model
+    model = "gemini-flash-latest"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
     
     parts = []
     if image_bytes:
@@ -205,7 +206,7 @@ def call_gemini_agent(user_text: str, image_bytes: bytes = None) -> str:
 
     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             result = json.loads(resp.read().decode("utf-8"))
             candidate = result.get("candidates", [{}])[0]
             content = candidate.get("content", {})
@@ -243,7 +244,7 @@ def call_gemini_agent(user_text: str, image_bytes: bytes = None) -> str:
                         ]
                     }
                     freq = urllib.request.Request(url, data=json.dumps(followup_payload).encode("utf-8"), headers={"Content-Type": "application/json"}, method="POST")
-                    with urllib.request.urlopen(freq) as fresp:
+                    with urllib.request.urlopen(freq, timeout=15) as fresp:
                         fresult = json.loads(fresp.read().decode("utf-8"))
                         ftext = fresult.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                         return ftext or tool_result
@@ -253,9 +254,8 @@ def call_gemini_agent(user_text: str, image_bytes: bytes = None) -> str:
 
             return "I have processed your request."
     except Exception as e:
-        print(f"Gemini API error: {e}")
-        # Fallback to local processing
-        return f"Assistant Agent processing: {user_text} (Internal: {e})"
+        print(f"Gemini API error or timeout ({e}). Falling back to local rule engine...")
+        return fallback_process(user_text)
 
 # --- AUDIO & TELEGRAM PIPELINE ---
 def ogg_to_wav(ogg_path: str, wav_path: str):
